@@ -1,4 +1,4 @@
-FROM node:24.22.1-bookworm
+FROM docker.io/library/node:24.22.1-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive \
     SCARF_ANALYTICS=false \

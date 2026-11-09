@@ -19,6 +19,13 @@ on:
       - '**/eslint-suppressions.json'
       - '.github/workflows/static-checks.yml'
       - '.husky/pre-push'
+      # Compose files and Dockerfiles sit outside the source trees above, and
+      # the container image name test below has to run when one of them changes.
+      - '**/Dockerfile*'
+      - '**/*compose*.yml'
+      - '**/*compose*.yaml'
+      - '**/*compose*.yml.example'
+      - 'rag.yml'
       - '!**.md'
 
 permissions:
@@ -209,6 +216,12 @@ jobs:
       - name: Test scoped dependency overrides
         if: steps.cache-node-modules.outputs.cache-hit == 'true' || steps.install_dependencies.outcome == 'success'
         run: npm run test:dependencies
+
+      # Podman has no default registry, so a short image name such as
+      # `mongo:8.0.20` fails to resolve for anyone running it with Podman.
+      - name: Test container image names
+        if: steps.cache-node-modules.outputs.cache-hit == 'true' || steps.install_dependencies.outcome == 'success'
+        run: npm run test:images
 
       # The @shadcn/lint design rules read each primitive's `cva` variants through
       # the @librechat/client entry point, which resolves to packages/client/dist.
