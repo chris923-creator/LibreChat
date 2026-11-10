@@ -26,6 +26,7 @@ import {
   EDGE_CLEANUP_MAX_SWEEPS,
   type AgentMethods,
 } from './agent';
+import { _resetStrictCache } from '~/models/plugins/tenantIsolation';
 import { withCodeEnvironmentReference } from './codeEnvironment';
 import { tenantStorage } from '~/config/tenantContext';
 import { createAclEntryMethods } from './aclEntry';
@@ -5595,6 +5596,50 @@ describe('getAgentManagementListByAccess', () => {
     });
     expect(result.data[0].versions).toBeUndefined();
     expect(after?.updatedAt).toEqual(beforeUpdatedAt);
+  });
+
+  it('keeps a null tenant limited to legacy rows when accessible IDs include another tenant', async () => {
+    const previousStrict = process.env.TENANT_ISOLATION_STRICT;
+    delete process.env.TENANT_ISOLATION_STRICT;
+    _resetStrictCache();
+    const tenantA = `tenant-a-${uuidv4()}`;
+    const author = new mongoose.Types.ObjectId();
+    const legacy = await createAgent({
+      id: `agent_${uuidv4()}`,
+      name: 'Legacy',
+      provider: 'openai',
+      model: 'gpt-4',
+      author,
+    });
+    const tenantAgent = await tenantStorage.run({ tenantId: tenantA }, () =>
+      createAgent({
+        id: `agent_${uuidv4()}`,
+        name: 'Tenant',
+        provider: 'openai',
+        model: 'gpt-4',
+        author,
+      }),
+    );
+
+    try {
+      const restricted = await getAgentManagementListByAccess({
+        accessibleIds: [legacy._id, tenantAgent._id],
+        tenantId: null,
+        limit: 20,
+      });
+      const unrestricted = await getAgentManagementListByAccess({
+        accessibleIds: null,
+        tenantId: null,
+        limit: 20,
+      });
+
+      expect(restricted.data.map(({ name }) => name)).toEqual(['Legacy']);
+      expect(unrestricted.data.map(({ name }) => name)).toEqual(['Legacy']);
+    } finally {
+      if (previousStrict == null) delete process.env.TENANT_ISOLATION_STRICT;
+      else process.env.TENANT_ISOLATION_STRICT = previousStrict;
+      _resetStrictCache();
+    }
   });
 
   it('enforces tenant scope even when accessible IDs contain another tenant record', async () => {

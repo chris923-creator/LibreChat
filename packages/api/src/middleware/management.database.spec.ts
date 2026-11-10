@@ -1,6 +1,12 @@
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
-import { createMethods, createModels, getTenantId, tenantStorage } from '@librechat/data-schemas';
+import {
+  createMethods,
+  createModels,
+  getTenantId,
+  resetTenantStrictCache,
+  tenantStorage,
+} from '@librechat/data-schemas';
 import type { AllMethods, AppConfig, IUser } from '@librechat/data-schemas';
 import type { Request, Response } from 'express';
 import { createAgentManagementAuth } from './management';
@@ -50,6 +56,7 @@ function createResponse(): Response {
 beforeAll(async () => {
   originalStrictMode = process.env.TENANT_ISOLATION_STRICT;
   process.env.TENANT_ISOLATION_STRICT = 'true';
+  resetTenantStrictCache();
   mongoServer = await MongoMemoryServer.create();
   await mongoose.connect(mongoServer.getUri());
   createModels(mongoose);
@@ -63,6 +70,7 @@ afterAll(async () => {
   } else {
     process.env.TENANT_ISOLATION_STRICT = originalStrictMode;
   }
+  resetTenantStrictCache();
   await mongoose.disconnect();
   await mongoServer?.stop();
 });
@@ -123,5 +131,48 @@ describe('Agent Management principal resolution with tenant isolation', () => {
 
     expect(crossTenantResponse.status).toHaveBeenCalledWith(401);
     expect(crossTenantNext).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unscoped binding in strict mode before reading a legacy user', async () => {
+    const findUser = jest.fn(methods.findUser);
+    const response = createResponse();
+    const next = jest.fn();
+    const auth = createAgentManagementAuth({
+      findUser,
+      isPrincipalActive: methods.isAgentTriggerPrincipalActive,
+      getAppConfig: jest.fn().mockResolvedValue({
+        endpoints: {
+          agents: {
+            managementApi: {
+              auth: {
+                oidc: {
+                  enabled: true,
+                  issuer: 'https://issuer.example.com',
+                  audience: 'https://agents.example.com',
+                },
+                clients: [
+                  {
+                    clientId: CLIENT_ID,
+                    userId: '507f1f77bcf86cd799439011',
+                    enabled: true,
+                  },
+                ],
+              },
+            },
+          },
+        },
+      } as AppConfig),
+      verifyAccessToken: jest.fn().mockResolvedValue({
+        sub: `${CLIENT_ID}@clients`,
+        azp: CLIENT_ID,
+        exp: Math.floor(Date.now() / 1000) + 60,
+      }),
+    });
+
+    await auth(createRequest(), response, next);
+
+    expect(findUser).not.toHaveBeenCalled();
+    expect(response.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
   });
 });

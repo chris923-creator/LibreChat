@@ -1,4 +1,4 @@
-import { logger, tenantStorage } from '@librechat/data-schemas';
+import { isTenantIsolationStrict, logger, tenantStorage } from '@librechat/data-schemas';
 import type { RequestHandler, Request, Response, NextFunction } from 'express';
 import type { AppConfig, IUser, UserMethods } from '@librechat/data-schemas';
 import type { TAgentsEndpoint } from 'librechat-data-provider';
@@ -105,8 +105,15 @@ function findClientBinding(auth: ManagementAuth, clientId: string): ManagementCl
   return auth.clients.find((client) => client.enabled !== false && client.clientId === clientId);
 }
 
-async function resolvePrincipal(
-  binding: ManagementClient,
+/** Legacy single-tenant rows store no tenant, null, or an empty string. */
+const UNSCOPED_TENANT_MATCH = { $in: [null, ''] } as const;
+
+function isUnscopedUser(user: IUser): boolean {
+  return user.tenantId == null || user.tenantId === '';
+}
+
+async function resolveScopedPrincipal(
+  binding: ManagementClient & { tenantId: string },
   deps: Pick<AgentManagementAuthDeps, 'findUser' | 'isPrincipalActive'>,
 ): Promise<PrincipalResolution> {
   return tenantStorage.run({ tenantId: binding.tenantId }, async () => {
@@ -125,6 +132,44 @@ async function resolvePrincipal(
     user.id = userId;
     return { status: 'resolved', user };
   });
+}
+
+async function resolveUnscopedPrincipal(
+  binding: ManagementClient,
+  deps: Pick<AgentManagementAuthDeps, 'findUser' | 'isPrincipalActive'>,
+): Promise<PrincipalResolution> {
+  /**
+   * Strict mode has no unscoped query path. Fail before a lookup so a missing
+   * tenant cannot fall through to system context or every stored tenant.
+   */
+  if (isTenantIsolationStrict()) {
+    return { status: 'missing' };
+  }
+
+  const user = await deps.findUser({ _id: binding.userId, tenantId: UNSCOPED_TENANT_MATCH });
+  if (!user) return { status: 'missing' };
+
+  const userId = String(user._id);
+  if (userId !== binding.userId.toLowerCase() || !isUnscopedUser(user)) {
+    return { status: 'missing' };
+  }
+
+  if (!(await deps.isPrincipalActive(userId))) {
+    return { status: 'inactive' };
+  }
+
+  user.id = userId;
+  return { status: 'resolved', user };
+}
+
+async function resolvePrincipal(
+  binding: ManagementClient,
+  deps: Pick<AgentManagementAuthDeps, 'findUser' | 'isPrincipalActive'>,
+): Promise<PrincipalResolution> {
+  if (binding.tenantId) {
+    return resolveScopedPrincipal({ ...binding, tenantId: binding.tenantId }, deps);
+  }
+  return resolveUnscopedPrincipal(binding, deps);
 }
 
 function continueWithPrincipal(

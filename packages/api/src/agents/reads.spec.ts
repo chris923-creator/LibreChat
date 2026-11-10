@@ -185,6 +185,57 @@ describe('Agent list access', () => {
 });
 
 describe('Agent Management read handlers', () => {
+  it('lists an unscoped USER through the legacy tenant query and the EDIT predicate', async () => {
+    const unscopedUser = { ...user, tenantId: undefined } as IUser;
+    const deps = makeDeps();
+    const response = makeResponse();
+
+    await createAgentManagementReadHandlers(deps).list(
+      makeRequest({ user: unscopedUser, query: { limit: '10' } }),
+      response,
+    );
+
+    expect(deps.findAccessibleResources).toHaveBeenCalledWith({
+      userId: user.id,
+      role: user.role,
+      idOnTheSource: user.idOnTheSource,
+      resourceType: ResourceType.AGENT,
+      requiredPermissions: PermissionBits.EDIT,
+    });
+    expect(deps.getAgentManagementListByAccess).toHaveBeenCalledWith({
+      accessibleIds: [objectId],
+      tenantId: null,
+      limit: 10,
+      after: undefined,
+    });
+    expect(deps.hasCapability).toHaveBeenCalledWith(unscopedUser, SystemCapabilities.MANAGE_AGENTS);
+    expect(response.status).toHaveBeenCalledWith(200);
+  });
+
+  it('reads an unscoped Agent with the same EDIT check and legacy tenant filter', async () => {
+    const unscopedUser = { ...user, tenantId: undefined } as IUser;
+    const deps = makeDeps();
+    const response = makeResponse();
+
+    await createAgentManagementReadHandlers(deps).get(
+      makeRequest({ user: unscopedUser, params: { id: 'agent-one' } }),
+      response,
+    );
+
+    expect(deps.getAgentWithVersionCount).toHaveBeenCalledWith({
+      id: 'agent-one',
+      tenantId: { $in: [null, ''] },
+    });
+    expect(deps.checkPermission).toHaveBeenCalledWith({
+      userId: user.id,
+      role: user.role,
+      resourceType: ResourceType.AGENT,
+      resourceId: objectId,
+      requiredPermission: PermissionBits.EDIT,
+    });
+    expect(response.status).toHaveBeenCalledWith(200);
+  });
+
   it('lists only ACL-discovered records in the authenticated tenant', async () => {
     const deps = makeDeps();
     const response = makeResponse();

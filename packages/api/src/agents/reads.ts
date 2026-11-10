@@ -18,16 +18,17 @@ import {
 import { checkAccessWithRequestCache } from '../middleware/access';
 
 type AgentManagementRecord = AgentManagementProjectionSource & { _id: Types.ObjectId };
+type ManagementTenantQuery = string | { $in: readonly [null, ''] };
 
 export interface AgentManagementReadDeps {
   getRoleByName: (roleName: string, fieldsToSelect?: string | string[]) => Promise<IRole | null>;
   getAgentWithVersionCount: (search: {
     id: string;
-    tenantId: string;
+    tenantId: ManagementTenantQuery;
   }) => Promise<AgentManagementRecord | null>;
   getAgentManagementListByAccess: (params: {
     accessibleIds: Types.ObjectId[] | null;
-    tenantId: string;
+    tenantId: string | null;
     limit: number;
     after?: string | null;
   }) => Promise<{
@@ -59,6 +60,16 @@ function sendError(
 ) {
   const mapped = mapAgentManagementError(code, error);
   return res.status(mapped.status).json(mapped.body);
+}
+
+/** Non-empty tenantId stays an exact binding. Anything else is the legacy unscoped row. */
+function boundTenantId(user: IUser): string | null {
+  return typeof user.tenantId === 'string' && user.tenantId !== '' ? user.tenantId : null;
+}
+
+function agentTenantQuery(user: IUser): ManagementTenantQuery {
+  const tenantId = boundTenantId(user);
+  return tenantId == null ? { $in: [null, ''] } : tenantId;
 }
 
 async function canUseAgents(req: Request, user: IUser, deps: AgentManagementReadDeps) {
@@ -120,7 +131,7 @@ export function createAgentManagementReadHandlers(deps: AgentManagementReadDeps)
 
     try {
       const user = req.user as IUser | undefined;
-      if (!user?.id || !user.tenantId) {
+      if (!user?.id) {
         return sendError(res, 'permission_denied');
       }
 
@@ -143,7 +154,7 @@ export function createAgentManagementReadHandlers(deps: AgentManagementReadDeps)
           });
       const result = await deps.getAgentManagementListByAccess({
         accessibleIds,
-        tenantId: user.tenantId,
+        tenantId: boundTenantId(user),
         limit: parsedQuery.data.limit,
         after: parsedQuery.data.cursor,
       });
@@ -158,7 +169,7 @@ export function createAgentManagementReadHandlers(deps: AgentManagementReadDeps)
   async function get(req: Request, res: Response): Promise<Response> {
     try {
       const user = req.user as IUser | undefined;
-      if (!user?.id || !user.tenantId) {
+      if (!user?.id) {
         return sendError(res, 'permission_denied');
       }
 
@@ -167,7 +178,7 @@ export function createAgentManagementReadHandlers(deps: AgentManagementReadDeps)
         hasManageAgentsCapability(user, deps),
         deps.getAgentWithVersionCount({
           id: req.params.id,
-          tenantId: user.tenantId,
+          tenantId: agentTenantQuery(user),
         }),
       ]);
       if (!canUse) {

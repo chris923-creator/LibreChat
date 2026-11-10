@@ -100,6 +100,7 @@ export {
   scopedCacheKey,
   SYSTEM_TENANT_ID,
 } from './config/tenantContext';
+export { isTenantIsolationStrict, resetTenantStrictCache } from './tenant/policy';
 export type { TenantContext } from './config/tenantContext';
 export {
   MCPServerNameMigrationError,

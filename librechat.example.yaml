@@ -789,7 +789,12 @@ endpoints:
   #       maxTokens: 4096 # Older answers drop first past this budget; the newest is always kept
   #   # (optional) Authenticate machine clients for the Agent Management API.
   #   # Each verified OAuth client is bound server-side to one existing LibreChat
-  #   # user and tenant; that user's normal role and Agent ACLs still apply.
+  #   # user. That user's role and Agent ACLs still apply; the binding does not
+  #   # grant ADMIN or EDIT. Omit tenantId when the installation is unscoped:
+  #   # the bound user must also have no tenantId, as created by `npm run create-user`
+  #   # with no tenant context. Set tenantId for an exact tenant binding. An
+  #   # omitted tenantId matches only an unscoped user, and an explicit tenantId
+  #   # matches only that tenant. Strict tenant isolation rejects an unscoped binding.
   #   managementApi:
   #     auth:
   #       oidc:
@@ -805,7 +810,7 @@ endpoints:
   #         - clientId: 'machine-client-id'
   #           # subject: 'provider-specific-service-principal-subject'
   #           userId: '507f1f77bcf86cd799439011'
-  #           tenantId: 'tenant-id'
+  #           # tenantId: 'tenant-id'
 
   # (optional) Custom request headers for the built-in OpenAI / Google endpoints.
   # Forwarded on every request to the provider (or an AI gateway / reverse proxy
