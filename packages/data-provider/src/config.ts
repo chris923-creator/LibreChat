@@ -923,13 +923,19 @@ const managementClientBindingSchema = z
       .trim()
       .regex(/^[a-f\d]{24}$/i, 'must be a MongoDB ObjectId')
       .transform((userId) => userId.toLowerCase()),
+    /**
+     * Exact tenant binding. Omit it only for an unscoped single-tenant user who
+     * also has no tenantId. Absence is not a wildcard and does not match a
+     * tenant-bound user.
+     */
     tenantId: z
       .string()
       .trim()
       .min(1)
       .max(128)
       .regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/, 'must be a valid tenant id')
-      .refine((tenantId) => tenantId !== '__SYSTEM__', 'system tenant is not allowed'),
+      .refine((tenantId) => tenantId !== '__SYSTEM__', 'system tenant is not allowed')
+      .optional(),
     enabled: z.boolean().default(true),
   })
   .strict();

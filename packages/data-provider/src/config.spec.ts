@@ -357,6 +357,78 @@ describe('Agent Management authentication config', () => {
     tenantId: 'tenant-a',
   };
 
+  it('accepts an unscoped single-tenant binding with no tenantId', () => {
+    const { tenantId: _tenantId, ...unscoped } = binding;
+    const result = configSchema.strict().safeParse({
+      version: '1.3.17',
+      endpoints: {
+        agents: {
+          managementApi: {
+            auth: {
+              oidc: {
+                enabled: true,
+                issuer: 'https://issuer.example.com',
+                audience: 'https://agents.example.com',
+              },
+              clients: [unscoped],
+            },
+          },
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.endpoints?.agents?.managementApi?.auth?.clients[0]).toEqual({
+      ...unscoped,
+      enabled: true,
+    });
+    expect(result.data.endpoints?.agents?.managementApi?.auth?.clients[0]).not.toHaveProperty(
+      'tenantId',
+    );
+  });
+
+  it.each([
+    ['an empty tenant id', ''],
+    ['a blank tenant id', '   '],
+    ['a null tenant id', null],
+  ])('rejects %s instead of treating it as unscoped', (_label, tenantId) => {
+    const result = configSchema.strict().safeParse({
+      version: '1.3.17',
+      endpoints: {
+        agents: {
+          managementApi: {
+            auth: {
+              oidc: {},
+              clients: [{ ...binding, tenantId }],
+            },
+          },
+        },
+      },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a client binding that tries to set a role', () => {
+    const { tenantId: _tenantId, ...unscoped } = binding;
+    const result = configSchema.strict().safeParse({
+      version: '1.3.17',
+      endpoints: {
+        agents: {
+          managementApi: {
+            auth: {
+              oidc: {},
+              clients: [{ ...unscoped, role: 'ADMIN' }],
+            },
+          },
+        },
+      },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   it('accepts an enabled OIDC configuration with a client binding', () => {
     const result = configSchema.safeParse({
       version: '1.0',

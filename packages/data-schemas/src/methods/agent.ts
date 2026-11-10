@@ -636,7 +636,8 @@ export function createAgentMethods(
   }: {
     /** `null` means the caller already passed the unrestricted management-capability check. */
     accessibleIds: Types.ObjectId[] | null;
-    tenantId: string;
+    /** Exact tenant, or `null` for legacy rows whose tenantId is missing, null, or empty. */
+    tenantId: string | null;
     limit: number;
     after?: string | null;
   }) => Promise<{
@@ -1587,7 +1588,8 @@ export function createAgentMethods(
   }: {
     /** `null` means the caller already passed the unrestricted management-capability check. */
     accessibleIds: Types.ObjectId[] | null;
-    tenantId: string;
+    /** Exact tenant, or `null` for legacy rows whose tenantId is missing, null, or empty. */
+    tenantId: string | null;
     limit: number;
     after?: string | null;
   }): Promise<{
@@ -1597,7 +1599,11 @@ export function createAgentMethods(
   }> {
     const Agent = mongoose.models.Agent as Model<IAgent>;
     const match: FilterQuery<IAgent> = {
-      tenantId,
+      /**
+       * `null` is the unscoped installation, not every tenant. `$in` matches a
+       * missing field, null, and the empty string without matching a real tenant id.
+       */
+      tenantId: tenantId == null || tenantId === '' ? { $in: [null, ''] } : tenantId,
       ...(accessibleIds != null ? { _id: { $in: accessibleIds } } : {}),
     };
 

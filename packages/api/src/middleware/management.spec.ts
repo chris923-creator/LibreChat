@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { getTenantId } from '@librechat/data-schemas';
+import { getTenantId, resetTenantStrictCache } from '@librechat/data-schemas';
 import type { AppConfig, IUser } from '@librechat/data-schemas';
 import type { Request, Response, NextFunction } from 'express';
 import type { JwtPayload } from 'jsonwebtoken';
@@ -195,6 +195,80 @@ describe('getMachineClientId', () => {
 });
 
 describe('createAgentManagementAuth', () => {
+  it('resolves an unscoped USER without entering a tenant context', async () => {
+    const config = createConfig();
+    const binding = config.endpoints?.agents?.managementApi?.auth?.clients[0];
+    if (binding) delete binding.tenantId;
+    let lookupTenant: string | undefined;
+    let downstreamTenant: string | undefined;
+    const deps = createDeps({
+      getAppConfig: jest.fn().mockResolvedValue(config),
+      findUser: jest.fn().mockImplementation(async () => {
+        lookupTenant = getTenantId();
+        return createUser({ tenantId: undefined });
+      }),
+    });
+    const req = createRequest();
+    const next = jest.fn(() => {
+      downstreamTenant = getTenantId();
+    });
+
+    await runMiddleware(deps, req, createResponse(), next);
+
+    expect(deps.findUser).toHaveBeenCalledWith({
+      _id: USER_ID,
+      tenantId: { $in: [null, ''] },
+    });
+    expect(lookupTenant).toBeUndefined();
+    expect(downstreamTenant).toBeUndefined();
+    expect(req.user).toMatchObject({ id: USER_ID, role: 'USER' });
+    expect((req.user as IUser | undefined)?.tenantId).toBeUndefined();
+    expect((req as Request & { tenantId?: string }).tenantId).toBeUndefined();
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let an unscoped binding select a tenant-bound user', async () => {
+    const config = createConfig();
+    const binding = config.endpoints?.agents?.managementApi?.auth?.clients[0];
+    if (binding) delete binding.tenantId;
+    const deps = createDeps({
+      getAppConfig: jest.fn().mockResolvedValue(config),
+      findUser: jest.fn().mockResolvedValue(createUser({ tenantId: 'tenant-b' })),
+    });
+    const res = createResponse();
+    const next = jest.fn();
+
+    await runMiddleware(deps, createRequest(), res, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('fails closed for an unscoped binding when tenant isolation is strict', async () => {
+    const previous = process.env.TENANT_ISOLATION_STRICT;
+    process.env.TENANT_ISOLATION_STRICT = 'true';
+    resetTenantStrictCache();
+    const config = createConfig();
+    const binding = config.endpoints?.agents?.managementApi?.auth?.clients[0];
+    if (binding) delete binding.tenantId;
+    const deps = createDeps({ getAppConfig: jest.fn().mockResolvedValue(config) });
+    const res = createResponse();
+    const next = jest.fn();
+
+    try {
+      await runMiddleware(deps, createRequest(), res, next);
+    } finally {
+      if (previous == null) delete process.env.TENANT_ISOLATION_STRICT;
+      else process.env.TENANT_ISOLATION_STRICT = previous;
+      resetTenantStrictCache();
+    }
+
+    expect(deps.findUser).not.toHaveBeenCalled();
+    expect(deps.isPrincipalActive).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it('resolves the configured User inside the bound tenant context', async () => {
     let lookupTenant: string | undefined;
     let downstreamTenant: string | undefined;
