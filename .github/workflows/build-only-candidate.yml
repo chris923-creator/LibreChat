@@ -1,0 +1,63 @@
+name: Build-only candidate image (no publish)
+
+# Build-only verification of candidate f0b5b448 (fork PR #1).
+# No registry login, no push, no artifacts, no cache export, no secrets.
+on:
+  push:
+    branches: [ci/build-only-f0b5b448]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-only-candidate
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Disk before
+        run: df -h /
+
+      - name: Free preinstalled toolchains on runner VM (disk headroom)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h /
+
+      - name: Checkout candidate commit
+        uses: actions/checkout@v5
+        with:
+          ref: f0b5b448b1589282c16c6e03721c6590527a9efc
+          persist-credentials: false
+
+      - name: Show checked-out commit
+        run: git rev-parse HEAD
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push, no load)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          load: false
+          outputs: type=cacheonly
+          tags: librechat-candidate:f0b5b448
+          build-args: |
+            BUILD_COMMIT=f0b5b448b1589282c16c6e03721c6590527a9efc
+            BUILD_BRANCH=ci/build-only-f0b5b448
+
+      - name: Build result
+        if: always()
+        run: |
+          echo "outcome=${{ steps.build.outcome }}"
+          echo "imageid=${{ steps.build.outputs.imageid }}"
+          echo "digest=${{ steps.build.outputs.digest }}"
+          docker buildx du || true
+          df -h /
